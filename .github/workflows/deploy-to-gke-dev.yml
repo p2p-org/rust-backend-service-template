@@ -1,0 +1,137 @@
+name: GKE dev
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+env:
+  GCE_PROJECT: wallet-prod-314018
+  GAR_LOCATION: europe-west3
+  GAR_REPO: token-service-repo
+  REGISTRY: europe-west3-docker.pkg.dev
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+        server_image_tag: ${{ steps.server_image_exists.outputs.tag }}
+        setup_image_tag: ${{ steps.setup_image_exists.outputs.tag }}
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v0
+        with:
+          create_credentials_file: false
+          credentials_json: ${{ secrets.GAR_CREDENTIALS }}
+          token_format: access_token
+      - id: server_image_exists
+        continue-on-error: true
+        run: |-
+          (echo "tag<<JSON"; curl -XGET -H"Authorization: Bearer ${{ steps.auth.outputs.access_token }}" https://artifactregistry.googleapis.com/v1/projects/$GCE_PROJECT/locations/$GAR_LOCATION/repositories/$GAR_REPO/packages/{{ package_name }}/tags/$GITHUB_SHA | tr -d '\n' | grep -v '"error":' | base64 -w0; echo; echo "JSON") >> $GITHUB_OUTPUT
+      - id: setup_image_exists
+        continue-on-error: true
+        run: |-
+          (echo "tag<<JSON"; curl -XGET -H"Authorization: Bearer ${{ steps.auth.outputs.access_token }}" https://artifactregistry.googleapis.com/v1/projects/$GCE_PROJECT/locations/$GAR_LOCATION/repositories/$GAR_REPO/packages/setup/tags/$GITHUB_SHA | tr -d '\n' | grep -v '"error":' | base64 -w0; echo; echo "JSON") >> $GITHUB_OUTPUT
+
+  tag:
+    name: Update tags
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: |-
+      needs.prepare.outputs.server_image_tag != '' ||
+      needs.prepare.outputs.setup_image_tag != ''
+
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v0
+        with:
+          create_credentials_file: false
+          credentials_json: ${{ secrets.GAR_CREDENTIALS }}
+          token_format: access_token
+
+      - name: Tag server
+        run: |-
+          echo '${{ needs.prepare.outputs.server_image_tag }}' | base64 -d | curl -XPOST -H"Authorization: Bearer ${{ steps.auth.outputs.access_token }}" https://artifactregistry.googleapis.com/v1/projects/$GCE_PROJECT/locations/$GAR_LOCATION/repositories/$GAR_REPO/packages/{{ image_name }}/tags?tagId=$GITHUB_REF_NAME -H"Content-Type: application/json"  -d@-
+      - name: Tag setup
+        run: |-
+          echo '${{ needs.prepare.outputs.setup_image_tag }}' | base64 -d | curl -XPOST -H"Authorization: Bearer ${{ steps.auth.outputs.access_token }}" https://artifactregistry.googleapis.com/v1/projects/$GCE_PROJECT/locations/$GAR_LOCATION/repositories/$GAR_REPO/packages/setup/tags?tagId=$GITHUB_REF_NAME -H"Content-Type: application/json"  -d@-
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: |-
+      needs.prepare.outputs.server_image_tag == '' ||
+      needs.prepare.outputs.setup_image_tag == ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.CI_DEPLOY_KEY }}
+
+      # Build the Docker image
+      - name: Build token service
+        run: |-
+          docker build --ssh default --platform linux/amd64 --tag "$REGISTRY/$GCE_PROJECT/$GAR_REPO/{{ image_name }}:$GITHUB_SHA" --tag "$REGISTRY/$GCE_PROJECT/$GAR_REPO/{{ image_name }}:$GITHUB_REF_NAME" --file devops/docker/server.Dockerfile .
+
+      - name: Build setup
+        run: |-
+          docker build --ssh default --platform linux/amd64 --tag "$REGISTRY/$GCE_PROJECT/$GAR_REPO/setup:$GITHUB_SHA" --tag "$REGISTRY/$GCE_PROJECT/$GAR_REPO/setup:$GITHUB_REF_NAME" --file devops/docker/setup.Dockerfile .
+
+      - id: auth
+        uses: google-github-actions/auth@v0
+        with:
+          credentials_json: ${{ secrets.GAR_CREDENTIALS }}
+          token_format: access_token
+
+      - uses: 'docker/login-action@v1'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+        # Publish the Docker image
+      - name: Publish server
+        run: |-
+          docker push --all-tags "$REGISTRY/$GCE_PROJECT/$GAR_REPO/{{ image_name }}"
+
+      - name: Publish setup
+        run: |-
+          docker push --all-tags "$REGISTRY/$GCE_PROJECT/$GAR_REPO/setup"
+
+  deploy:
+    name: Deploy
+    needs: [tag, build]
+    if: |-
+      always() &&
+      (needs.tag.result == 'success' || needs.tag.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+        # Clone, Parse and Update Helm Values
+      - name: Install yq
+        uses: mikefarah/yq@v4.27.3
+
+      - name: Clone Helm Chart Repository
+        uses: actions/checkout@v3
+        with:
+          repository: p2p-org/p2p-wallet-helm-charts
+          path: helm-chart
+          ref: main
+          token: ${{ secrets.CI_DEPLOY_TOKEN }}
+
+      - name: Update Helm Values
+        run: |
+          cd helm-chart
+          yq e -i '.global.image.tag |= strenv(GITHUB_REF_NAME)' charts/{{ chart_name }}/values.dev.yaml
+          git config --global user.email "github@p2p.org"
+          git config --global user.name "Github Actions"
+          git add charts/{{ chart_name }}/values.dev.yaml
+          git commit -m "Release $GITHUB_REF_NAME"
+          git push

@@ -1,0 +1,72 @@
+env_scripts = ['''
+#!@duckscript
+project_name = get_env PROJECT_NAME
+if not is_empty ${project_name}
+    db_url = get_env DATABASE_URL_${project_name}
+    set_env DATABASE_URL ${db_url}
+end
+''']
+
+[env]
+PROJECT_NAME = "${CARGO_MAKE_CRATE_NAME}"
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+RUST_LOG = "debug"
+RUST_BACKTRACE = "1"
+
+[tasks.setup-db]
+description = "Create database"
+
+[tasks.migrate-bin]
+description = "Run custom migration"
+
+[tasks.reset-db]
+description = "Reset database"
+
+[tasks.migrate-db]
+description = "Migrate database"
+
+[tasks.setup]
+dependencies = ["setup-db", "migrate-bin"]
+description = "Setup application"
+
+[tasks.ci-setup]
+dependencies = ["setup"]
+
+[tasks.format-toml]
+install_crate = { crate_name = "taplo-cli", binary = "taplo", test_arg = "--help" }
+command = "taplo"
+args = ["fmt"]
+
+[tasks.format]
+dependencies = ["format-toml"]
+toolchain = "nightly"
+
+[tasks.check-format]
+toolchain = "nightly"
+
+[tasks.fmt]
+alias = "format"
+
+[tasks.ci-flow]
+workspace = false
+
+[tasks.pre-ci-flow]
+dependencies = ["setup-github-token"]
+
+[tasks.setup-github-token]
+script_runner = "@duckscript"
+script = '''
+github_token = get_env GH_TOKEN
+if ${github_token}
+    exec git config --global url."https://${github_token}:@github.com/".insteadOf "https://github.com/"
+end
+'''
+
+[tasks.build]
+args = ["build"]
+
+[tasks.clippy-ci-flow]
+condition = { platforms = ["linux"] }
+
+[tasks.check-format-ci-flow]
+condition = { platforms = ["linux"] }

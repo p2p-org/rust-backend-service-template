@@ -1,0 +1,9 @@
+[package]
+name = "{{ project-name }}-service"
+authors = ["{{ authors }}"]
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rust-utils = { workspace = true, features = ["settings", "db"] }
+tracing = { workspace = true }

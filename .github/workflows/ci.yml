@@ -1,0 +1,61 @@
+name: CI
+on:
+  push:
+    paths-ignore:
+      - "devops/**"
+      - "README.md"
+      - "docker-compose.yaml"
+      - "docker-compose.*.yaml"
+      - ".gitignore"
+      - ".dockerignore"
+  pull_request:
+    paths-ignore:
+      - "devops/**"
+      - "README.md"
+      - "docker-compose.yaml"
+      - "docker-compose.*.yaml"
+      - ".gitignore"
+      - ".dockerignore"
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Install stable rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    - name: Install nightly rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        profile: minimal
+        components: rustfmt, clippy
+    - name: Install cargo-make
+      uses: davidB/rust-cargo-make@v1
+    - name: Setup cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/debug/build
+          target/release/build
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Setup utils cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-bin-${{ hashFiles('Makefile.toml') }}
+    - name: Run CI
+      uses: actions-rs/cargo@v1
+      env:
+        RUST_LOG: debug
+      with:
+        command: make
+        args: ci-flow

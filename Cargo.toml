@@ -1,0 +1,67 @@
+[workspace]
+members = [
+  "rpc",
+  "rabbitmq",
+  "server",
+]
+
+[profile.release]
+lto = true
+
+[workspace.dependencies]
+rust-utils = { git = "https://github.com/p2p-org/rust-utils", version = "^1.0.0", tag = "v1.0.0", features = [] }
+
+# Members dependencies
+{{ project-name }}-rabbitmq = { path = "rabbitmq" }
+{{ project-name }}-rpc = { path = "rpc" }
+{{ project-name }}-server = { path = "server" }
+
+# General dependencies
+async-trait = "0.1"
+dotenvy = "0.15"
+lazy_static = "1.4"
+
+# Error handling
+thiserror = "1"
+anyhow = "1.0"
+
+# Tracing, logging, metrics
+log = "0.4"
+tracing = "0.1"
+
+# Extra data types
+chrono = "0.4"
+normdecimal = { version = "0.1", features = ["borsh", "sqlx", "postgres"] }
+uuid = { version = "1.2.2", features = ["v4", "serde"] }
+
+# Derives
+strum = "0.25"
+strum_macros = "0.25"
+
+# Serde, data formats
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_with = "3"
+
+borsh = "0.9"
+bs58 = "0.4"
+base64 = "0.13"
+
+# Network dependencies
+tokio = { version = "1", features = ["full"] }
+backoff = { version = "0.4", features = ["futures", "tokio"] }
+jsonrpsee = { version = "0.18.2", features = ["server", "client", "macros"] }
+
+# Database dependencies
+sqlx = { version = "0.6", features = ["runtime-tokio-native-tls", "postgres", "macros", "chrono", "migrate", "uuid"] }
+
+# Solana SDK
+solana-sdk = "1.14"
+solana-program = "1.14"
+
+solana-client = "1.14"
+solana-account-decoder = "1.14"
+solana-transaction-status = "1.14"
+
+# SPL programs
+spl-token = { version = "3.2", features = ["no-entrypoint"] }

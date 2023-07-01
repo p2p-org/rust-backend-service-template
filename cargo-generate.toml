@@ -1,0 +1,11 @@
+[placeholders.chart_name]
+type = "string"
+prompt = "Helm chart name"
+
+[placeholders.image_name]
+type = "string"
+prompt = "Docker image name"
+
+[placeholders.env_prefix]
+type = "string"
+prompt = "Environment variable prefix"
